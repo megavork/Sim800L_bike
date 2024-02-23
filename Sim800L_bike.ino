@@ -5,13 +5,16 @@
 #include <TimeLib.h>
 
 unsigned long timeRange;
-long currentSleepTime = 50;  //min
-long time = 0;
-int msgNumber = 1;
-//sender phone number with country code
-//const String PHONE = "+ZZxxxxxxxxxx";//For only 1 default number user
 String PHONE = "+48792668255";  //For Multiple user
 String msg;
+
+long currentSleepTime = 50;  //min
+long time = 0;
+int countSms = 0;
+
+bool isCheckAllSms = false;
+bool isRedUnreadSms = false;
+bool isAllUnreadSmsCheck = false;
 
 //GSM Module RX pin to Arduino 4
 //GSM Module TX pin to Arduino 3
@@ -24,7 +27,9 @@ SoftwareSerial sim800(txPin, rxPin);
 void setup() {
   pinMode(LED_PIN, OUTPUT);  //Setting Pin 13 as output
   digitalWrite(LED_PIN, LOW);
-  delay(1000);
+  delay(200);
+
+  isCheckAllSms = true;
 
   Serial.begin(9600);
   Serial.println("Initializing Serial... ");
@@ -33,27 +38,27 @@ void setup() {
   Serial.println("Initializing GSM module...");
 
   sim800.print("AT+CMGF=1\r");  //SMS text mode
-  delay(1000);
+  delay(5000);
 
   time = minute();
-
-  // String commandSmsCheck = "AT+CMGR=";
-  // commandSmsCheck.concat(msgNumber);
-  // commandSmsCheck.concat("\r");
-
-  // sim800.print(commandSmsCheck);  //SMS text mode
-  // delay(300);
 }
 
 void loop() {
-  flash();
 
-  // String commandSmsCheck = "AT+CMGR=";
-  // commandSmsCheck.concat(msgNumber);
-  // commandSmsCheck.concat("\r");
+  delay(5000);
 
-  // sim800.print(commandSmsCheck);  //SMS text mode
-  // delay(300);
+  String commandSmsCheck = "";
+
+  if (isCheckAllSms) {
+    commandSmsCheck = "AT+CPMS?\r";
+  } else if (isRedUnreadSms) {
+    commandSmsCheck = "AT+CMGR=" + String(countSms) + "\r";
+  } else {
+    commandSmsCheck = "";
+  }
+
+  sim800.print(commandSmsCheck);
+  delay(1000);
 
   while (sim800.available()) {
     parseData(sim800.readString());  //Calls the parseData function to parse SMS
@@ -67,9 +72,10 @@ void loop() {
 }
 
 void parseData(String buff) {
-  Serial.print("buff1:");
-  Serial.println(buff);
-  Serial.println("!");
+  buff.trim();
+  Serial.println("Start parsing data:");
+
+  Serial.println("buff1:" + String(buff) + ":%");
 
   unsigned int index;
   unsigned int indexLast;
@@ -79,11 +85,9 @@ void parseData(String buff) {
   buff.remove(0, index + 2);
   buff.trim();
 
-  Serial.print("buff2:");
-  Serial.print(buff);
-  Serial.println("!");
+  Serial.println("buff2:" + String(buff) + ":%");
 
-  if (buff != "OK") {
+  if (buff.indexOf("OK") >= 0) {
 
     index = buff.indexOf(":");
     String cmd = buff.substring(0, index);
@@ -91,64 +95,130 @@ void parseData(String buff) {
 
     buff.remove(0, index + 2);
 
-    Serial.print("buff3:");
-    Serial.print(cmd);
-    Serial.println("!");
+    Serial.println("cmd3:" + String(cmd) + ":%");
 
     //Parse necessary message from SIM800L Serial buffer string
     if (cmd == "+CMT") {
-      Serial.println("CMT_MSG:");
-      //get newly arrived memory location and store it in temp
-      index = buff.lastIndexOf(0x0D);                  //Looking for position of CR(Carriage Return)
-      msg = buff.substring(index + 2, buff.length());  //Writes message to variable "msg"
-      msg.toLowerCase();
+      parseCMT_Command(buff);
 
-      Serial.print("msg: ");  //Whole message gets changed to lower case
-      Serial.println(msg);
+    } else if (cmd.indexOf("+CMGR") >= 0) {
+      parseCMGR_Command(buff);
 
-      index = buff.indexOf(0x22);                     //Looking for position of first double quotes-> "
-      PHONE = buff.substring(index + 1, index + 14);  //Writes phone number to variable "PHONE"
-      Serial.println(PHONE);
-
-    } else if (cmd.indexOf("+CMGR") > 0) {
-      Serial.println("CMGR_MSG:");
-
-      Serial.print("buff4:");
-      Serial.print(buff);
-      Serial.println("!");
-
-      //get newly arrived memory location and store it in temp
-      index = buff.lastIndexOf(0x22);                  //Looking for position of CR(Carriage Return)
-      indexLast = buff.lastIndexOf(0x0a);              // looking for a new line mark
-      msg = buff.substring(index + 2, indexLast - 1);  //Writes message to variable "msg"
-      msg.toLowerCase();
-      msg.trim();
-
-      Serial.print("msg: ");  //Whole message gets changed to lower case
-      Serial.println(msg);
-
-      index = buff.indexOf(0x2C);                     //Looking for position of first double quotes-> "
-      PHONE = buff.substring(index + 2, index + 14);  //Writes phone number to variable "PHONE"
-      Serial.print("PHONE: ");
-      Serial.println(PHONE);
-
-      if (msgNumber >= 1) {
-        // msgNumber--;
-
-        sim800.print("AT+CMGDA=\"DEL READ\"\r");
-        delay(500);
-
-        sim800.print("AT+CMGDA=\"DEL SENT\"\r");
-        delay(500);
-      }
+    } else if (cmd.indexOf("+CPMS") >= 0) {
+      parseCPMS_Command(buff);
     }
+
+  } else if (buff.indexOf("CMTI") >= 0) {
+    parseCMTI_Command(buff);
+
   } else {
-     Serial.println("BAD REQUEST.");
+    Serial.println("BAD REQUEST.");
     //TODO: RESTART / sleep 8sec and restart
   }
 }
 
+void parseCMT_Command(String buff) {
+  Serial.println("CMT_MSG:");
+  //get newly arrived memory location and store it in temp
+  int index = buff.lastIndexOf(0x0D);              //Looking for position of CR(Carriage Return)
+  msg = buff.substring(index + 2, buff.length());  //Writes message to variable "msg"
+  msg.toLowerCase();
+
+  Serial.println("msg:" + String(msg) + ":%");
+
+  index = buff.indexOf(0x22);                     //Looking for position of first double quotes-> "
+  PHONE = buff.substring(index + 1, index + 14);  //Writes phone number to variable "PHONE"
+  Serial.println(PHONE);
+}
+
+void parseCMGR_Command(String buff) {
+  Serial.println("CMGR_MSG:");
+
+  Serial.println("buff4:" + String(buff) + ":%");
+
+  //get newly arrived memory location and store it in temp
+  int index = buff.lastIndexOf(0x22);              //Looking for position of CR(Carriage Return)
+  int indexLast = buff.lastIndexOf(0x0a);          // looking for a new line mark
+  msg = buff.substring(index + 2, indexLast - 1);  //Writes message to variable "msg"
+  msg.toLowerCase();
+  msg.trim();
+
+  Serial.print("msg: ");  //Whole message gets changed to lower case
+  Serial.println(msg);
+
+  index = buff.indexOf(0x2C);                     //Looking for position of first double quotes-> "
+  PHONE = buff.substring(index + 2, index + 14);  //Writes phone number to variable "PHONE"
+
+  Serial.print("PHONE: ");
+  Serial.println(PHONE);
+
+  if (countSms >= 0) {
+    countSms = 0;
+
+    sim800.print("AT+CMGDA=\"DEL READ\"\r");
+    delay(500);
+
+    sim800.print("AT+CMGDA=\"DEL SENT\"\r");
+    delay(500);
+
+    isCheckAllSms = false;
+    isRedUnreadSms = false;
+  }
+}
+
+void parseCPMS_Command(String buff) {
+  Serial.println("CPMS:");
+
+  Serial.println("buff5:" + String(buff) + ":%");
+
+  int index = buff.lastIndexOf("SM_P") + 6;
+  msg = buff.substring(index, index + 1);
+  countSms = msg.toInt();
+
+  Serial.println("COUNT:" + String(countSms) + ":%");
+
+  isCheckAllSms = false;
+
+  if (countSms > 0) {
+    isRedUnreadSms = true;
+  } else {
+    isAllUnreadSmsCheck = true;
+  }
+}
+
+void parseCMTI_Command(String buff) {
+  Serial.println("CMTI:");
+
+  Serial.println("buff6:" + String(buff) + ":%");
+
+  int index = buff.lastIndexOf(",");
+  msg = buff.substring(index+1, index+2);
+  countSms = msg.toInt();
+
+  Serial.println("COUNT:" + String(countSms) + ":%");
+
+  isCheckAllSms = false;
+
+  if (countSms > 0) {
+    isRedUnreadSms = true;
+  } else {
+    isAllUnreadSmsCheck = true;
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
 void doAction() {
+
+  Serial.println("Start doing acton:");
 
   if (msg == "alarm") {
     Reply("ALARM activated.");
@@ -174,6 +244,7 @@ void doAction() {
   } else if (minute() - time > 1) {  //1min
 
     Serial.println("SLEEP mode");
+    time = minute();
     // sleepMode(1);
   }
 
@@ -181,7 +252,18 @@ void doAction() {
   msg = "";    //Clears message string
 }
 
+
+
+
+
+
+
+
+
+
+
 void Reply(String text) {
+  Serial.println("Start reply:");
   sim800.print("AT+CMGF=1\r");
   delay(500);
   sim800.print("AT+CMGS=\"" + PHONE + "\"\r");
@@ -192,20 +274,6 @@ void Reply(String text) {
   delay(500);
   Serial.println("SMS Sent Successfully.");
 }
-
-void flash() {
-  pinMode(LED_BUILTIN, OUTPUT);
-
-  for (byte i = 0; i < 10; i++) {
-    digitalWrite(LED_BUILTIN, HIGH);
-    delay(300);
-    digitalWrite(LED_BUILTIN, LOW);
-    delay(300);
-  }
-
-  pinMode(LED_BUILTIN, INPUT);
-
-}  // end of flash
 
 // watchdog interrupt
 ISR(WDT_vect) {
