@@ -15,6 +15,7 @@ int countSms = 0;
 bool isCheckAllSms = false;
 bool isRedUnreadSms = false;
 bool isAllUnreadSmsCheck = false;
+bool isSleepActivated = false;
 
 //GSM Module RX pin to Arduino 4
 //GSM Module TX pin to Arduino 3
@@ -41,11 +42,12 @@ void setup() {
   delay(5000);
 
   time = minute();
+  isSleepActivated = false;
 }
 
 void loop() {
 
-  delay(5000);
+  delay(3000);
 
   String commandSmsCheck = "";
 
@@ -57,8 +59,12 @@ void loop() {
     commandSmsCheck = "";
   }
 
+  if(isSleepActivated) {
+    sleepMode(2);
+  }
+
   sim800.print(commandSmsCheck);
-  delay(1000);
+  delay(500);
 
   while (sim800.available()) {
     parseData(sim800.readString());  //Calls the parseData function to parse SMS
@@ -206,16 +212,6 @@ void parseCMTI_Command(String buff) {
   }
 }
 
-
-
-
-
-
-
-
-
-
-
 void doAction() {
 
   Serial.println("Start doing acton:");
@@ -229,7 +225,7 @@ void doAction() {
   } else if (msg == "lock") {
     Reply("LOCK activated. Regular algorithm. Check every 50min.");
 
-  } else if (msg == "sleep ") {
+  } else if (msg == "sleep") {
     //TODO: NOT WORKING
     Reply("SLEEP every * mins.");
 
@@ -242,25 +238,13 @@ void doAction() {
     Reply("LED is OFF");
 
   } else if (minute() - time > 1) {  //1min
-
-    Serial.println("SLEEP mode");
-    time = minute();
-    // sleepMode(1);
+    Serial.println("SLEEP mode.");
+    isSleepActivated = true;
   }
 
   PHONE = "";  //Clears phone string
   msg = "";    //Clears message string
 }
-
-
-
-
-
-
-
-
-
-
 
 void Reply(String text) {
   Serial.println("Start reply:");
@@ -283,12 +267,12 @@ ISR(WDT_vect) {
 void sleepMode(long newTime) {
   Serial.println("Time to sleep.");
   //time in minutes
-  if (newTime != 0) {
+  if (newTime > 0) {
     currentSleepTime = newTime;
   }
 
   //374 cycles = 50min: 50min * 60 / 8
-  //7 for test
+  //7 cycles for test: 1min
   int cycles = currentSleepTime * 60 / 8;
 
   for (int i = 0; i < cycles; i++) {
@@ -316,6 +300,28 @@ void sleepMode(long newTime) {
 
   // cancel sleep as a precaution
   sleep_disable();
+  Serial.println("Wake UP.");
+  startUpSettings();
+}
+
+void startUpSettings() {
+  pinMode(LED_PIN, OUTPUT);  //Setting Pin 13 as output
+  digitalWrite(LED_PIN, LOW);
+  delay(200);
+
+  isCheckAllSms = true;
+
+  Serial.begin(9600);
+  Serial.println("Initializing Serial... ");
+
+  sim800.begin(9600);
+  Serial.println("Initializing GSM module...");
+
+  sim800.print("AT+CMGF=1\r");  //SMS text mode
+  delay(5000);
+
+  time = minute();
+  isSleepActivated = false;
 }
 
 //send GPS coords after 15mins
