@@ -1,12 +1,16 @@
 #include <SoftwareSerial.h>
-#include <EEPROM.h>
+#include <TinyGPS++.h>
 #include <avr/sleep.h>
 #include <avr/wdt.h>
 #include <TimeLib.h>
+#include <EEPROM.h>
 
 unsigned long timeRange;
-String PHONE = "+48792668255";  //For Multiple user
+String const PHONE = "+48792668255";  //For Multiple user
+String smsPhone = "";  //For Multiple user
 String msg;
+String const googleMap = "https://maps.google.com/?q=";
+String gpsCoords = "";
 
 long currentSleepTime = 50;  //min
 long time = 0;
@@ -16,6 +20,13 @@ bool isCheckAllSms = false;
 bool isRedUnreadSms = false;
 bool isAllUnreadSmsCheck = false;
 bool isSleepActivated = false;
+bool isGpsRequested = false;
+
+#define RX_PIN 11  // Arduino Pin connected to the TX of the GPS module
+#define TX_PIN 10  // Arduino Pin connected to the RX of the GPS module
+
+TinyGPSPlus gps;                           // the TinyGPS++ object
+SoftwareSerial gpsSerial(RX_PIN, TX_PIN);  // the serial interface to the GPS module
 
 //GSM Module RX pin to Arduino 4
 //GSM Module TX pin to Arduino 3
@@ -34,6 +45,9 @@ void setup() {
 
   Serial.begin(9600);
   Serial.println("Initializing Serial... ");
+
+  // gpsSerial.begin(9600);  // Default baud of NEO-6M GPS module is 9600
+  // Serial.println("Initializing GPS module...");
 
   sim800.begin(9600);
   Serial.println("Initializing GSM module...");
@@ -71,6 +85,18 @@ void loop() {
 
   sim800.print(commandSmsCheck);
   delay(500);
+
+  while (isGpsRequested) {
+    gpsCoords = getGpsCoords();
+
+    if (gpsCoords != "") {
+      gpsSerial.end();
+      sim800.begin(9600);
+      Serial.println("Initializing GSM module...");
+      delay(1000);
+      isGpsRequested = false;
+    }
+  }
 
   while (sim800.available()) {
     parseData(sim800.readString());  //Calls the parseData function to parse SMS
@@ -139,8 +165,8 @@ void parseCMT_Command(String buff) {
   Serial.println("msg:" + String(msg) + ":%");
 
   index = buff.indexOf(0x22);                     //Looking for position of first double quotes-> "
-  PHONE = buff.substring(index + 1, index + 14);  //Writes phone number to variable "PHONE"
-  Serial.println(PHONE);
+  smsPhone = buff.substring(index + 1, index + 14);  //Writes phone number to variable "PHONE"
+  Serial.println(smsPhone);
 }
 
 void parseCMGR_Command(String buff) {
@@ -159,10 +185,10 @@ void parseCMGR_Command(String buff) {
   Serial.println(msg);
 
   index = buff.indexOf(0x2C);                     //Looking for position of first double quotes-> "
-  PHONE = buff.substring(index + 2, index + 14);  //Writes phone number to variable "PHONE"
+  smsPhone = buff.substring(index + 2, index + 14);  //Writes phone number to variable "PHONE"
 
-  Serial.print("PHONE: ");
-  Serial.println(PHONE);
+  Serial.print("smsPhone: ");
+  Serial.println(smsPhone);
 
   if (countSms >= 0) {
     countSms = 0;
@@ -226,13 +252,23 @@ void doAction() {
     Reply("ALARM activated.");
 
   } else if (msg == "where r u" || msg == "where are you" || msg == "where are u" || msg == "where r you" || msg == "w r u" || msg == "wru") {
-    Reply("GPS coords sended.");
+    gpsCoords = "";
+    isGpsRequested = true;
+    // Reply("GPS coords sended.");
 
   } else if (msg == "lock") {
     Reply("LOCK activated. Regular algorithm. Check every 50min.");
 
   } else if (msg == "sleep") {
     Reply("SLEEP every * mins.");
+
+  } else if (gpsCoords != "") {
+    Reply("GPS:");
+    delay(2000);
+    
+    Reply(gpsCoords);
+    delay(1000);
+    gpsCoords = "";
 
   } else if (msg == "led on") {
     digitalWrite(LED_PIN, HIGH);
@@ -253,7 +289,7 @@ void doAction() {
     isSleepActivated = true;
   }
 
-  PHONE = "";  //Clears phone string
+  smsPhone = "";  //Clears phone string
   msg = "";    //Clears message string
 }
 
@@ -333,6 +369,41 @@ void startUpSettings() {
 
   time = minute();
   isSleepActivated = false;
+}
+
+String getGpsCoords() {
+  sim800.end();
+  gpsSerial.begin(9600);  // Default baud of NEO-6M GPS module is 9600
+  Serial.println("Initializing GPS module...");
+  delay(1000);
+
+  long gpsTime = minute();
+  String result = "";
+  Serial.println("Get Gps Coords:");
+  while (result == "") {
+    while (gpsSerial.available()) {
+      if (gps.encode(gpsSerial.read())) {
+        if (gps.location.isValid()) {
+          Serial.print(F("- latitude: "));
+          Serial.println(gps.location.lat(), 6);
+
+          Serial.print(F("- longitude: "));
+          Serial.println(gps.location.lng(), 6);
+
+          result = googleMap + String(gps.location.lat(), 6) + "," + String(gps.location.lng(), 6);
+          Serial.println(result);
+          return result;
+        } else if (minute() - gpsTime > 1) {
+          break;
+        } else {
+          Serial.println(F("- location: INVALID"));
+          return "";
+        }
+      }
+      // if (millis() > 5000 && gps.charsProcessed() < 10)
+      //   Serial.println(F("No GPS data received: check wiring"));
+    }
+  }
 }
 
 //send GPS coords after 15mins
