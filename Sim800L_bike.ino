@@ -39,7 +39,10 @@ void setup() {
   Serial.println("Initializing GSM module...");
 
   sim800.print("AT+CMGF=1\r");  //SMS text mode
-  delay(5000);
+  delay(1000);
+
+  sim800.print("AT+CMGL=\"ALL\"\r");  //SMS text mode
+  delay(1000);
 
   time = minute();
   isSleepActivated = false;
@@ -48,6 +51,10 @@ void setup() {
 void loop() {
 
   delay(3000);
+
+  // if(isSleepActivated) {
+  //   sleepMode(2);
+  // }
 
   String commandSmsCheck = "";
 
@@ -59,12 +66,8 @@ void loop() {
     commandSmsCheck = "";
   }
 
-  if(isSleepActivated) {
-    sleepMode(2);
-  }
-
   sim800.print(commandSmsCheck);
-  delay(500);
+  delay(2000);
 
   while (sim800.available()) {
     parseData(sim800.readString());  //Calls the parseData function to parse SMS
@@ -198,7 +201,7 @@ void parseCMTI_Command(String buff) {
   Serial.println("buff6:" + String(buff) + ":%");
 
   int index = buff.lastIndexOf(",");
-  msg = buff.substring(index+1, index+2);
+  msg = buff.substring(index + 1, index + 2);
   countSms = msg.toInt();
 
   Serial.println("COUNT:" + String(countSms) + ":%");
@@ -236,6 +239,12 @@ void doAction() {
   } else if (msg == "led off") {
     digitalWrite(LED_PIN, LOW);
     Reply("LED is OFF");
+
+  } else if (msg == "clear") {
+    sim800.print("AT+CMGDA=\"DEL ALL\"\r");
+    delay(1000);
+    countSms--;
+    Reply("Deleted all SMS.");
 
   } else if (minute() - time > 1) {  //1min
     Serial.println("SLEEP mode.");
