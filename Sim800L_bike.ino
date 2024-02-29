@@ -41,7 +41,10 @@ void setup() {
   sim800.print("AT+CMGF=1\r");  //SMS text mode
   delay(1000);
 
-  sim800.print("AT+CMGL=\"ALL\"\r");  //SMS text mode
+  sim800.print("AT+CSQ\r");  //SMS text mode
+  delay(1000);
+
+  sim800.print("AT+COPS?\r");  //SMS text mode
   delay(1000);
 
   time = minute();
@@ -50,7 +53,7 @@ void setup() {
 
 void loop() {
 
-  delay(3000);
+  delay(500);
 
   // if(isSleepActivated) {
   //   sleepMode(2);
@@ -67,7 +70,7 @@ void loop() {
   }
 
   sim800.print(commandSmsCheck);
-  delay(2000);
+  delay(500);
 
   while (sim800.available()) {
     parseData(sim800.readString());  //Calls the parseData function to parse SMS
@@ -229,7 +232,6 @@ void doAction() {
     Reply("LOCK activated. Regular algorithm. Check every 50min.");
 
   } else if (msg == "sleep") {
-    //TODO: NOT WORKING
     Reply("SLEEP every * mins.");
 
   } else if (msg == "led on") {
@@ -246,7 +248,7 @@ void doAction() {
     countSms--;
     Reply("Deleted all SMS.");
 
-  } else if (minute() - time > 1) {  //1min
+  } else if (minute() - time > 5) {  //5min
     Serial.println("SLEEP mode.");
     isSleepActivated = true;
   }
